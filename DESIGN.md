@@ -159,15 +159,8 @@ are not things worth reimplementing by hand.
 - **Auth instead of a body parameter.** `companyId` in the request body is a test-harness
   convenience and the one genuinely weak link — a real deployment derives it from a signed
   session, and the agent layer would not change.
-- **A wider eval set.** `npm run eval` replays eight recorded traces through the real
-  executor, guards and database ([`eval.ts`](packages/core/src/eval.ts)); `--live` runs the
-  same expectations against the model. Eight cases covers the failures I know about — it
-  should grow with every question that turns out to go wrong, and should assert the shape of
-  an answer (does it cite a transaction id?) as well as its figures.
-- **Richer tools** — period-over-period comparison and top-N by account still have none, so
-  those questions rely on the model stitching lookups together. `monthly_totals` closed the
-  "which month was worst?" gap, which used to need one call per month against a six-round
-  budget.
+- **Two more tools.** Top N accounts and period-over-period comparison still don't have
+  one, so those questions lean on the model stitching several lookups together.
 - **Token-level streaming of the answer**, once the guard can verify incrementally — that
   means verifying each figure as it is emitted rather than checking the finished text, which
   is a bigger change than it sounds.

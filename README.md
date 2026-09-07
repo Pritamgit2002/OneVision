@@ -96,12 +96,8 @@ fail on four assertions.
   in [tenant.ts](apps/api/src/middleware/tenant.ts) and
   [ask.validator.ts](apps/api/src/validators/ask.validator.ts), and nothing in the agent
   layer moves.
-- **A wider eval set.** Eight cases is enough to catch the failures I know about. I'd grow
-  it with every question that goes wrong, and add an assertion on the *shape* of an answer
-  (does it cite a transaction id at all?) rather than only its figures.
-- **Two more tools.** `monthly_totals` covers "which month was worst" and trends. Top N
-  accounts and period-over-period comparison still don't have one, so those questions lean
-  on the model stitching several lookups together.
+- **Two more tools.** Top N accounts and period-over-period comparison still don't have
+  one, so those questions lean on the model stitching several lookups together.
 - **Currency.** There's no currency column in the data. At one point the model rendered a
   figure as `₹39,885.64` for the Indian company — a sensible guess from the company name,
   not from the ledger. The prompt now bans currency symbols outright, but the proper fix is
