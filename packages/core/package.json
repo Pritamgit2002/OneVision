@@ -16,6 +16,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "ask": "tsx src/cli.ts",
     "check": "tsx src/check.ts",
+    "eval": "tsx src/eval.ts",
     "transcripts": "tsx src/transcripts.ts"
   },
   "dependencies": {

@@ -10,6 +10,7 @@ import {
   budgetVsActual,
   getCoverage,
   listAccounts,
+  monthlyTotals,
   queryTransactions,
   type AccountType,
 } from '../db/queries.js';
@@ -20,6 +21,7 @@ const ALLOWED_ARGS: Record<string, string[]> = {
   list_accounts: [],
   get_data_coverage: [],
   query_transactions: ['account_ids', 'account_type', 'start_date', 'end_date'],
+  monthly_totals: ['account_ids', 'account_type', 'start_month', 'end_month'],
   budget_vs_actual: ['account_ids', 'start_period', 'end_period'],
 };
 
@@ -109,6 +111,20 @@ export class ToolExecutor {
           end_date: str(args['end_date']),
         });
         assertTransactionsOwnedBy(this.companyId, res.rows.map((r) => r.transaction_id));
+        return res;
+      }
+
+      case 'monthly_totals': {
+        const start = str(args['start_month']);
+        const end = str(args['end_month']);
+        if (!start || !end) throw new Error('start_month and end_month are both required (YYYY-MM).');
+        const res = monthlyTotals(this.companyId, {
+          account_ids: intArray(args['account_ids']),
+          account_type: args['account_type'] as AccountType | undefined,
+          start_month: start,
+          end_month: end,
+        });
+        assertTransactionsOwnedBy(this.companyId, res.months.flatMap((m) => m.transaction_ids));
         return res;
       }
 

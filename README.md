@@ -7,7 +7,8 @@ can't support an answer, it says so instead of guessing.
 ```bash
 cp .env.example .env      # add your OPENAI_API_KEY
 npm install
-npm run check             # offline checks — no API key, no network
+npm run check             # 45 offline checks on the data layer — no API key, no network
+npm run eval              # 8 model-layer cases, replayed — no API key, no tokens
 npm run dev               # API on :4000, UI on http://localhost:3000
 ```
 
@@ -17,13 +18,15 @@ One question from the terminal:
 npm run ask -- --company 100 "What was our total marketing spend in March?"
 ```
 
-Ten worked examples, including refusals and an injection attempt, are in
-[transcripts.md](transcripts.md) — all real captured output.
+Eleven worked examples are in [transcripts.md](transcripts.md), all real captured output.
+Worth skimming: **6** answers "which month was highest, which was lightest" from a single
+lookup, and in **11** the model is asked to combine two months, finds that no tool returns
+a combined figure, and goes and fetches one rather than adding the two numbers itself.
 
 ## The approach, and why
 
 The four CSVs load into an in-memory SQLite database at startup. The model never writes
-SQL and never does arithmetic. It picks one of four tools and fills in typed parameters;
+SQL and never does arithmetic. It picks one of five tools and fills in typed parameters;
 the SQL behind each tool computes the totals, variances and percentages; the model just
 writes a sentence around numbers it didn't produce.
 
@@ -35,8 +38,9 @@ of question, and for financial data I think that's the right trade — a finance
 can't tell an exact answer from an approximate one by looking at it.
 
 The same logic applies to the numbers. `budget_vs_actual` returns variance and variance %
-already computed, so the model is never in a position where doing its own subtraction
-would be convenient. Then there's a check after the fact:
+already computed, and `monthly_totals` returns the highest and lowest month already picked
+out, so the model is never in a position where doing its own subtraction — or its own
+ranking — would be convenient. Then there's a check after the fact:
 [verify.ts](packages/core/src/agent/verify.ts) pulls every number out of the finished
 answer and matches it against the numbers the tools actually returned. Anything unmatched
 gets one corrective retry, and if it fails again the answer is withheld rather than shown.
@@ -61,19 +65,43 @@ gets one corrective retry, and if it fails again the answer is withheld rather t
 
 Easy way to spot a leak: March marketing is `45,974.39` for company 100 and `39,885.64`
 for company 200. Same question, two different numbers. `npm run check` asserts both, and
-transcripts 6 and 7 cover a question that name-drops the other company and a straight
+transcripts 7 and 8 cover a question that name-drops the other company and a straight
 "ignore all previous instructions" injection. Both are refused.
+
+## Tests
+
+Two suites, both free to run.
+
+`npm run check` covers the data layer: 45 assertions on totals, variances, month-by-month
+figures and the tenant guards, every expected number worked out from the raw CSVs. No model
+involved, so it never flakes and never costs anything.
+
+`npm run eval` covers everything above that. The model is replaced by a recorded script of
+its own turns, but the tools, the database and the guards are all real, so the numbers are
+still computed live underneath the script. That's what makes the useful cases possible:
+replaying company 100's answer text under company 200 forces the guard to catch a foreign
+figure, and a scripted `company_id: 200` argument shows it being dropped. Both are hard to
+trigger by asking questions by hand.
+
+`npm run eval -- --live` runs the same expectations against the real model, for when I want
+to know the prompt still holds up and not just the plumbing.
+
+They're not decorative — putting `OR company_id = 200` into one query makes `npm run eval`
+fail on four assertions.
 
 ## With more time
 
 - **Real auth.** The company id arrives in the request body, which is fine for a test but
   is the weak link. In production it should come from the signed session — a small change
-  in [ask.ts](apps/api/src/routes/ask.ts), and nothing in the agent layer moves.
-- **Tests for the model layer.** The deterministic side has 38 assertions; the model side
-  is only covered by the transcripts. I'd snapshot answers against fixed tool traces so a
-  prompt edit can't quietly regress behaviour.
-- **More tools** — period-over-period, top N accounts, trend by month. "Which month was
-  worst?" currently takes several round trips and doesn't always land.
+  in [tenant.ts](apps/api/src/middleware/tenant.ts) and
+  [ask.validator.ts](apps/api/src/validators/ask.validator.ts), and nothing in the agent
+  layer moves.
+- **A wider eval set.** Eight cases is enough to catch the failures I know about. I'd grow
+  it with every question that goes wrong, and add an assertion on the *shape* of an answer
+  (does it cite a transaction id at all?) rather than only its figures.
+- **Two more tools.** `monthly_totals` covers "which month was worst" and trends. Top N
+  accounts and period-over-period comparison still don't have one, so those questions lean
+  on the model stitching several lookups together.
 - **Currency.** There's no currency column in the data. At one point the model rendered a
   figure as `₹39,885.64` for the Indian company — a sensible guess from the company name,
   not from the ledger. The prompt now bans currency symbols outright, but the proper fix is

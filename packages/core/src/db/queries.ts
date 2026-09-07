@@ -314,6 +314,91 @@ export function budgetVsActual(companyId: number, f: BudgetFilters): BudgetResul
   };
 }
 
+export interface MonthlyFilters {
+  account_ids?: number[];
+  account_type?: AccountType;
+  start_month: string; // YYYY-MM
+  end_month: string;   // YYYY-MM
+}
+
+export interface MonthlyTotalsResult {
+  period_start: string;
+  period_end: string;
+  months: { period: string; total: number; row_count: number; transaction_ids: number[] }[];
+  /** Calendar months in the range with no transactions at all — not the same as a zero total. */
+  months_without_activity: string[];
+  /** Picked here, not by the model: "which month was worst" is a comparison over ledger data. */
+  highest: { period: string; total: number } | null;
+  lowest: { period: string; total: number } | null;
+}
+
+/** Every month between two YYYY-MM bounds, inclusive. */
+function monthsBetween(start: string, end: string): string[] {
+  const [sy, sm] = start.split('-').map(Number);
+  const [ey, em] = end.split('-').map(Number);
+  if (!sy || !sm || !ey || !em) return [];
+  const out: string[] = [];
+  for (let y = sy, m = sm; (y < ey || (y === ey && m <= em)) && out.length < 240; ) {
+    out.push(`${y}-${String(m).padStart(2, '0')}`);
+    if (++m > 12) { m = 1; y++; }
+  }
+  return out;
+}
+
+/**
+ * One total per calendar month, plus the highest and lowest month.
+ *
+ * Exists so "which month was worst?" is a single lookup instead of one call per month
+ * against a six-round budget — and so the comparison happens in SQL. Asking the model to
+ * pick the largest of twelve numbers is asking it to do arithmetic by another name.
+ */
+export function monthlyTotals(companyId: number, f: MonthlyFilters): MonthlyTotalsResult {
+  const ids = f.account_ids ?? [];
+  const where: string[] = ['t.company_id = ?', 'substr(t.date, 1, 7) BETWEEN ? AND ?'];
+  const params: unknown[] = [companyId, f.start_month, f.end_month];
+
+  if (ids.length) {
+    where.push(`t.account_id IN (${ids.map(() => '?').join(',')})`);
+    params.push(...ids);
+  }
+  if (f.account_type) { where.push('a.account_type = ?'); params.push(f.account_type); }
+
+  const rows = (
+    db()
+      .prepare(
+        `SELECT substr(t.date, 1, 7) AS period,
+                SUM(${SIGNED_AMOUNT_SQL}) AS total,
+                COUNT(*) AS row_count,
+                GROUP_CONCAT(t.transaction_id) AS ids
+           FROM transactions t
+           JOIN accounts a ON a.account_id = t.account_id
+          WHERE ${where.join(' AND ')}
+       GROUP BY period
+       ORDER BY period`,
+      )
+      .all(...params) as { period: string; total: number; row_count: number; ids: string | null }[]
+  ).map((r) => ({
+    period: r.period,
+    total: money(r.total),
+    row_count: r.row_count,
+    transaction_ids: r.ids ? r.ids.split(',').map(Number).sort((a, b) => a - b) : [],
+  }));
+
+  const seen = new Set(rows.map((r) => r.period));
+  const ranked = [...rows].sort((a, b) => b.total - a.total);
+  const top = ranked[0];
+  const bottom = ranked.at(-1);
+
+  return {
+    period_start: f.start_month,
+    period_end: f.end_month,
+    months: rows,
+    months_without_activity: monthsBetween(f.start_month, f.end_month).filter((m) => !seen.has(m)),
+    highest: top ? { period: top.period, total: top.total } : null,
+    lowest: bottom ? { period: bottom.period, total: bottom.total } : null,
+  };
+}
+
 /**
  * Independent second look: confirm every transaction id in a result really belongs to
  * `companyId`. Deliberately its own statement rather than a reuse of the query above —

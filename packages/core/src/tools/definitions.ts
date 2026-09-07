@@ -63,6 +63,40 @@ export const TOOLS: FunctionTool[] = [
   },
   {
     type: 'function',
+    name: 'monthly_totals',
+    strict: false,
+    description:
+      'Break a total down by calendar month. Returns one total per month with its ' +
+      'transaction ids, which months in the range had no activity at all, and the highest ' +
+      'and lowest month already picked out. Use this for "which month was worst/best", ' +
+      '"how has X trended", or any month-by-month comparison — do not call ' +
+      'query_transactions once per month, and do not compare the months yourself. For a ' +
+      'single period, prefer query_transactions: it returns the individual rows, which this ' +
+      'tool does not.',
+    parameters: {
+      type: 'object',
+      properties: {
+        account_ids: {
+          type: 'array',
+          items: { type: 'integer' },
+          description: 'Account ids to include. Omit for all accounts.',
+        },
+        account_type: {
+          type: 'string',
+          enum: ['Revenue', 'Expense', 'Asset', 'Liability', 'Equity'],
+          description:
+            'Restrict to one account type. Pass this or account_ids for a meaningful ' +
+            'total — an unfiltered month mixes revenue and expense into one figure.',
+        },
+        start_month: { type: 'string', description: 'Inclusive first period, YYYY-MM.' },
+        end_month: { type: 'string', description: 'Inclusive last period, YYYY-MM.' },
+      },
+      required: ['start_month', 'end_month'],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: 'function',
     name: 'budget_vs_actual',
     strict: false,
     description:

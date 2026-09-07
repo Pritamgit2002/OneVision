@@ -1,5 +1,9 @@
 import OpenAI from 'openai';
-import type { ResponseInput, ResponseInputItem } from 'openai/resources/responses/responses';
+import type {
+  ResponseFunctionToolCall,
+  ResponseInput,
+  ResponseInputItem,
+} from 'openai/resources/responses/responses';
 import { getCompanyName } from '../db/queries.js';
 import { TOOLS } from '../tools/definitions.js';
 import { ToolExecutor, type EvidenceEntry } from '../tools/executor.js';
@@ -28,7 +32,10 @@ export type EventSink = (event: AgentEvent) => void;
 
 /** Human-readable label for a tool call, used by the progress stream. */
 function describe(tool: string, args: Record<string, unknown>): string {
-  const range = [args['start_date'] ?? args['start_period'], args['end_date'] ?? args['end_period']]
+  const range = [
+    args['start_date'] ?? args['start_period'] ?? args['start_month'],
+    args['end_date'] ?? args['end_period'] ?? args['end_month'],
+  ]
     .filter(Boolean)
     .join(' to ');
   switch (tool) {
@@ -38,6 +45,8 @@ function describe(tool: string, args: Record<string, unknown>): string {
       return 'Checking what data exists';
     case 'query_transactions':
       return range ? `Querying transactions, ${range}` : 'Querying transactions';
+    case 'monthly_totals':
+      return range ? `Totalling by month, ${range}` : 'Totalling by month';
     case 'budget_vs_actual':
       return range ? `Comparing actual to budget, ${range}` : 'Comparing actual to budget';
     default:
@@ -53,6 +62,12 @@ function summarise(result: unknown): string {
     const n = r['row_count'] as number;
     return n ? `${n} transaction${n === 1 ? '' : 's'}, total ${(r['total'] as number).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'no matching transactions';
   }
+  if ('months' in r) {
+    const months = r['months'] as { period: string }[];
+    const high = r['highest'] as { period: string } | null;
+    if (!months.length) return 'no activity in that range';
+    return `${months.length} month${months.length === 1 ? '' : 's'}${high ? `, highest ${high.period}` : ''}`;
+  }
   if ('lines' in r) {
     const n = (r['lines'] as unknown[]).length;
     return `${n} account${n === 1 ? '' : 's'} compared`;
@@ -62,6 +77,51 @@ function summarise(result: unknown): string {
   }
   if (Array.isArray(r)) return `${r.length} rows`;
   return 'done';
+}
+
+/** One turn of model output: the items it produced, and its prose if it produced any. */
+export interface ModelResponse {
+  output: ResponseInputItem[];
+  output_text: string;
+}
+
+/**
+ * The seam between the agent loop and the model.
+ *
+ * Injecting this is what lets the regression suite replay a recorded run through the real
+ * executor, verifier and tenant guards without an API key or a token spend — see eval.ts.
+ * Production passes `openAiClient()` and nothing else changes.
+ */
+export interface ModelClient {
+  /** Reported as `model` on the result. */
+  readonly name: string;
+  respond(req: { instructions: string; input: ResponseInput }): Promise<ModelResponse>;
+}
+
+export function openAiClient(): ModelClient {
+  const apiKey = process.env['OPENAI_API_KEY'];
+  if (!apiKey) throw new Error('OPENAI_API_KEY is not set. Copy .env.example to .env and fill it in.');
+
+  const name = process.env['OPENAI_MODEL'] || 'gpt-4o';
+  const client = new OpenAI({ apiKey });
+
+  return {
+    name,
+    async respond({ instructions, input }) {
+      const response = await client.responses.create({
+        model: name,
+        instructions,
+        input,
+        tools: TOOLS,
+        tool_choice: 'auto',
+        store: false,
+      });
+      return {
+        output: response.output as ResponseInputItem[],
+        output_text: (response.output_text ?? '').trim(),
+      };
+    },
+  };
 }
 
 export interface AskResult {
@@ -85,22 +145,18 @@ export async function ask(
   companyId: number,
   question: string,
   onEvent: EventSink = () => {},
+  client: ModelClient = openAiClient(),
 ): Promise<AskResult> {
   const companyName = getCompanyName(companyId);
   if (!companyName) throw new Error(`Unknown company id ${companyId}.`);
   if (!question.trim()) throw new Error('Question is empty.');
 
-  const apiKey = process.env['OPENAI_API_KEY'];
-  if (!apiKey) throw new Error('OPENAI_API_KEY is not set. Copy .env.example to .env and fill it in.');
-
-  const model = process.env['OPENAI_MODEL'] || 'gpt-4o';
-  const client = new OpenAI({ apiKey });
   const executor = new ToolExecutor(companyId);
   const instructions = buildSystemPrompt(companyId);
 
   const input: ResponseInput = [{ role: 'user', content: question }];
 
-  let answer = await converse(client, model, instructions, input, executor, onEvent);
+  let answer = await converse(client, instructions, input, executor, onEvent);
   onEvent({ type: 'verifying' });
   let verification = verifyAnswer(answer, executor.evidence, question);
   const firstPassViolations = verification.violations;
@@ -113,7 +169,7 @@ export async function ask(
     retried = true;
     onEvent({ type: 'retrying', violations: verification.violations.map((v) => v.token) });
     input.push({ role: 'user', content: correctionMessage(verification.violations) });
-    answer = await converse(client, model, instructions, input, executor, onEvent);
+    answer = await converse(client, instructions, input, executor, onEvent);
     onEvent({ type: 'verifying' });
     verification = verifyAnswer(answer, executor.evidence, question);
 
@@ -134,7 +190,7 @@ export async function ask(
     evidence: executor.evidence,
     verification: { ...verification, retried, withheld, first_pass_violations: firstPassViolations },
     tenant_argument_attempted: executor.tenantArgumentAttempted,
-    model,
+    model: client.name,
   };
 }
 
@@ -151,8 +207,7 @@ export async function ask(
  * tool calls.
  */
 async function converse(
-  client: OpenAI,
-  model: string,
+  client: ModelClient,
   instructions: string,
   input: ResponseInput,
   executor: ToolExecutor,
@@ -160,19 +215,14 @@ async function converse(
 ): Promise<string> {
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     onEvent({ type: 'thinking', round });
-    const response = await client.responses.create({
-      model,
-      instructions,
-      input,
-      tools: TOOLS,
-      tool_choice: 'auto',
-      store: false,
-    });
+    const response = await client.respond({ instructions, input });
 
-    input.push(...(response.output as ResponseInputItem[]));
+    input.push(...response.output);
 
-    const calls = response.output.filter((item) => item.type === 'function_call');
-    if (!calls.length) return (response.output_text ?? '').trim();
+    const calls = response.output.filter(
+      (item): item is ResponseFunctionToolCall => item.type === 'function_call',
+    );
+    if (!calls.length) return response.output_text.trim();
 
     for (const call of calls) {
       const parsedArgs = safeParse(call.arguments);

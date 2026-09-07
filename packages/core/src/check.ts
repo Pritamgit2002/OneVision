@@ -11,6 +11,7 @@ import {
   assertTransactionsOwnedBy,
   budgetVsActual,
   getCoverage,
+  monthlyTotals,
   queryTransactions,
 } from './db/queries.js';
 import { verifyAnswer } from './agent/verify.js';
@@ -76,6 +77,15 @@ check('Q4 2026 has no transactions', queryTransactions(100, { start_date: '2026-
 const revBudget = budgetVsActual(100, { account_ids: [1], start_period: '2026-01', end_period: '2026-06' });
 check('revenue has no budget on file', revBudget.accounts_without_budget, ['Sales Revenue']);
 
+console.log('\n\x1b[1mMonthly totals\x1b[0m');
+const byMonth100 = monthlyTotals(100, { account_ids: [3], start_month: '2026-01', end_month: '2026-06' });
+check('co100 marketing spans 6 months', byMonth100.months.length, 6);
+check('co100 worst marketing month = 2026-06', byMonth100.highest, { period: '2026-06', total: 93451.07 });
+check('co100 lightest marketing month = 2026-05', byMonth100.lowest, { period: '2026-05', total: 18634.81 });
+check('March still reconciles with the single-period query', byMonth100.months[2]?.total, mar100.total);
+const fullYear = monthlyTotals(100, { account_ids: [3], start_month: '2026-01', end_month: '2026-12' });
+check('Jul-Dec reported as empty, not as zero', fullYear.months_without_activity.length, 6);
+
 console.log('\n\x1b[1mTenant isolation\x1b[0m');
 const ids100 = queryTransactions(100, {}).rows.map((r) => r.transaction_id);
 const ids200 = queryTransactions(200, {}).rows.map((r) => r.transaction_id);
@@ -83,6 +93,10 @@ check('no transaction id is shared between companies', ids100.filter((i) => ids2
 check("co100's own rows pass the ownership assertion", assertTransactionsOwnedBy(100, ids100), undefined);
 checkThrows("co200's rows are rejected when bound to co100", () => assertTransactionsOwnedBy(100, ids200));
 check('co100 never sees the March figure belonging to co200', mar100.rows.some((r) => r.amount === 39885.64), false);
+const byMonth200 = monthlyTotals(200, { account_ids: [3], start_month: '2026-01', end_month: '2026-06' });
+check('co200 has its own worst month', byMonth200.highest, { period: '2026-04', total: 114478.05 });
+checkThrows('monthly rows for co200 are rejected against co100', () =>
+  assertTransactionsOwnedBy(100, byMonth200.months.flatMap((m) => m.transaction_ids)));
 
 console.log('\n\x1b[1mNumeric guard\x1b[0m');
 const evidence: EvidenceEntry[] = [{ tool: 'query_transactions', arguments: {}, result: mar100 }];

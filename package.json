@@ -13,6 +13,7 @@
     "typecheck": "turbo run typecheck",
     "ask": "npm run ask -w @gl/core --",
     "check": "npm run check -w @gl/core",
+    "eval": "npm run eval -w @gl/core --",
     "transcripts": "npm run transcripts -w @gl/core"
   },
   "devDependencies": {

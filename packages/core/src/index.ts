@@ -22,7 +22,28 @@ import type { LoadSummary } from './db/load.js';
 export { ask, type AskResult, type AgentEvent, type EventSink } from './agent/run.js';
 export { INSUFFICIENT_DATA } from './agent/prompt.js';
 export { verifyAnswer, type VerificationResult, type Violation } from './agent/verify.js';
-export { listCompaniesForUi, getCompanyName, getCoverage } from './db/queries.js';
+export {
+  listCompaniesForUi,
+  getCompanyName,
+  getCoverage,
+  listAccounts,
+  queryTransactions,
+  budgetVsActual,
+  monthlyTotals,
+} from './db/queries.js';
+export type {
+  Account,
+  AccountType,
+  BudgetFilters,
+  BudgetLine,
+  BudgetResult,
+  Coverage,
+  MonthlyFilters,
+  MonthlyTotalsResult,
+  TransactionFilters,
+  TransactionResult,
+  TransactionRow,
+} from './db/queries.js';
 export type { EvidenceEntry } from './tools/executor.js';
 
 /** Repo-root `data/`, overridable with GL_DATA_DIR. Works from both src/ (tsx) and dist/. */

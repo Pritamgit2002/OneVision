@@ -1,8 +1,7 @@
 import 'dotenv/config';
-import cors from 'cors';
-import express from 'express';
 import { bootstrap } from '@gl/core';
-import { router } from './routes/ask.js';
+import { createApp } from './app.js';
+import { env } from './config/env.js';
 
 const summary = bootstrap();
 console.log(
@@ -10,11 +9,6 @@ console.log(
     `${summary.accounts} accounts, ${summary.budgetRows} budget rows.`,
 );
 
-const app = express();
-app.use(cors());
-app.use(express.json({ limit: '64kb' }));
-app.use('/api', router);
-app.get('/health', (_req, res) => res.json({ ok: true, ...summary }));
-
-const port = Number(process.env['PORT'] ?? 4000);
-app.listen(port, () => console.log(`API listening on http://localhost:${port}`));
+createApp(summary).listen(env.port, () =>
+  console.log(`API listening on http://localhost:${env.port}`),
+);

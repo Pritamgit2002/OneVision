@@ -7,7 +7,8 @@ came from** — or an honest refusal.
 ```bash
 cp .env.example .env          # add your OPENAI_API_KEY
 npm install
-npm run check                 # 25 offline assertions — no API key, no network
+npm run check                 # 45 offline assertions — no API key, no network
+npm run eval                  # 8 replayed model-layer cases — no API key, no tokens
 npm run transcripts           # regenerates transcripts.md from real model runs
 npm run dev                   # API on :4000, UI on http://localhost:3000
 ```
@@ -44,10 +45,12 @@ financial data that is the right trade. A system that answers 80% of questions e
 worth more than one that answers 100% approximately, because a finance manager cannot tell
 the two apart by looking.
 
-**Four tools**, none of which accepts a company:
+**Five tools**, none of which accepts a company:
 `list_accounts` (maps "marketing spend" to an account id) · `get_data_coverage` (what data
 exists — this is what makes refusals honest rather than random) · `query_transactions` (rows,
-total, per-account breakdown) · `budget_vs_actual` (actual, budget, variance, variance-%,
+total, per-account breakdown) · `monthly_totals` (one total per month, plus the highest and
+lowest month **already picked out** — asking the model to choose the largest of twelve numbers
+is arithmetic by another name) · `budget_vs_actual` (actual, budget, variance, variance-%,
 **all pre-computed** so the model is never in a position where doing its own subtraction
 would be convenient).
 
@@ -70,7 +73,9 @@ Six ways it could leak, and where each is closed:
 
 The tenant comes from the request body today; in production it comes from the authenticated
 session. Either way it is server-side context that the question cannot influence — swapping
-the source is a one-line change in [`routes/ask.ts`](apps/api/src/routes/ask.ts).
+the source is a one-line change in
+[`middleware/tenant.ts`](apps/api/src/middleware/tenant.ts), the single place the HTTP layer
+admits a company.
 
 **The leak detector:** marketing spend in March is `45,974.39` for company 100 and
 `39,885.64` for company 200. Same question, two tenants, two figures — if isolation ever
@@ -141,7 +146,7 @@ Vague questions get a clarifying question rather than a guess.
 ```
 data/                   the 4 CSVs, chmod 444 — read at boot, never written
 packages/core/          db · tools · agent · CLI      ← all the logic lives here
-apps/api/               Express: POST /ask, GET /companies
+apps/api/               Express: routes → controllers → services → @gl/core
 apps/web/               Next.js chat UI with the evidence panel
 ```
 
@@ -154,11 +159,15 @@ are not things worth reimplementing by hand.
 - **Auth instead of a body parameter.** `companyId` in the request body is a test-harness
   convenience and the one genuinely weak link — a real deployment derives it from a signed
   session, and the agent layer would not change.
-- **A golden-question regression suite.** `npm run check` covers the deterministic layer
-  thoroughly; the model layer is currently only covered by the transcripts. Snapshot testing
-  answers against fixed tool traces would catch prompt regressions without burning tokens.
-- **Richer tools** — period-over-period comparison, top-N by account, trend over months.
-  Today a "which month was worst?" question needs several round trips.
+- **A wider eval set.** `npm run eval` replays eight recorded traces through the real
+  executor, guards and database ([`eval.ts`](packages/core/src/eval.ts)); `--live` runs the
+  same expectations against the model. Eight cases covers the failures I know about — it
+  should grow with every question that turns out to go wrong, and should assert the shape of
+  an answer (does it cite a transaction id?) as well as its figures.
+- **Richer tools** — period-over-period comparison and top-N by account still have none, so
+  those questions rely on the model stitching lookups together. `monthly_totals` closed the
+  "which month was worst?" gap, which used to need one call per month against a six-round
+  budget.
 - **Token-level streaming of the answer**, once the guard can verify incrementally — that
   means verifying each figure as it is emitted rather than checking the finished text, which
   is a bigger change than it sounds.
@@ -205,7 +214,7 @@ of the code; the notes below are what actually happened rather than a tidied-up 
   `-18`. Fixing that surfaced the second bug — with dates matched at 1% tolerance, `2019` sat
   inside ±20 of `2026` and passed. Dates are now extracted first and matched exactly.
 - **A claim in this README that the transcripts falsified.** It originally said a figure from
-  the question "cannot survive into the answer". Then case 10 planted `91,000`, and the model
+  the question "cannot survive into the answer". Then the planted-figure case tried `91,000`, and the model
   did the right thing — quoted it back to correct it. It passed the guard, but only by luck:
   `91,000` happens to fall within 1% of April's real total. A planted figure further from the
   data would have been flagged and a correct refutation suppressed. Question-sourced figures
