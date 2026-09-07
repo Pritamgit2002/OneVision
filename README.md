@@ -98,6 +98,8 @@ fail on four assertions.
   layer moves.
 - **Two more tools.** Top N accounts and period-over-period comparison still don't have
   one, so those questions lean on the model stitching several lookups together.
+- **Implement Caching.** as the data is limited we can use caching is proper way to speed
+  up the model and reduce the cost of the API.
 - **Currency.** There's no currency column in the data. At one point the model rendered a
   figure as `₹39,885.64` for the Indian company — a sensible guess from the company name,
   not from the ledger. The prompt now bans currency symbols outright, but the proper fix is
