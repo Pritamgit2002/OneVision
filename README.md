@@ -18,7 +18,7 @@ One question from the terminal:
 npm run ask -- --company 100 "What was our total marketing spend in March?"
 ```
 
-A short demo walkthrough is in [onevision.mp4](onevision.mp4).
+![Demo walkthrough](demo.gif)
 
 Eleven worked examples are in [transcripts.md](transcripts.md), all real captured output.
 Worth skimming: **6** answers "which month was highest, which was lightest" from a single
