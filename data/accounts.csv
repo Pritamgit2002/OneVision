@@ -1,0 +1,11 @@
+AccountID,AccountName,AccountType
+1,Sales Revenue,Revenue
+2,Cost of Goods Sold,Expense
+3,Marketing Expense,Expense
+4,Salaries Expense,Expense
+5,Rent Expense,Expense
+6,Cash,Asset
+7,Accounts Receivable,Asset
+8,Accounts Payable,Liability
+9,Fixed Assets,Asset
+10,Owner's Equity,Equity
